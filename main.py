@@ -1,7 +1,7 @@
 import os
 import fitz  # PyMuPDF
 import requests
-import anthropic
+import google.generativeai as genai  # <-- CHANGED
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,18 +9,18 @@ from dotenv import load_dotenv
 
 # Load the secret API key from the .env file
 load_dotenv()
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # <-- CHANGED
 
 # --- FastAPI App Setup ---
 app = FastAPI(
-    title="Science Summarizer API",
-    description="An API to summarize scientific papers from a URL.",
+    title="Science Summarizer API (Gemini Edition)",  # <-- CHANGED
+    description="An API to summarize scientific papers from a URL using Google Gemini.",
 )
 
 # This is crucial for allowing our frontend to talk to our backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins for simplicity
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,7 +29,7 @@ app.add_middleware(
 
 # --- Pydantic Models ---
 class PaperRequest(BaseModel):
-    url: HttpUrl  # FastAPI will automatically validate that this is a real URL
+    url: HttpUrl
 
 
 class AnalysisResponse(BaseModel):
@@ -41,12 +41,11 @@ class AnalysisResponse(BaseModel):
 # --- Core Logic Functions ---
 
 def get_text_from_url(url: str) -> str:
-    """Downloads a PDF from a URL and extracts all text."""
+    """Downloads a PDF from a URL and extracts all text. (No changes here)"""
     try:
         response = requests.get(url, timeout=30)
-        response.raise_for_status()  # Raises an error for bad responses (4xx or 5xx)
+        response.raise_for_status()
 
-        # Ensure the content is a PDF
         if "application/pdf" not in response.headers.get("Content-Type", ""):
             raise HTTPException(status_code=400, detail="URL does not point to a PDF file.")
 
@@ -61,23 +60,22 @@ def get_text_from_url(url: str) -> str:
     except requests.RequestException as e:
         raise HTTPException(status_code=400, detail=f"Failed to download the file: {e}")
     except Exception as e:
-        # Catches PyMuPDF errors or other unexpected issues
         raise HTTPException(status_code=500, detail=f"An error occurred while processing the PDF: {e}")
 
 
 def get_summary_from_ai(text: str) -> AnalysisResponse:
-    """Sends text to Anthropic's AI for analysis and returns a structured response."""
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured.")
+    """Sends text to Google's Gemini AI for analysis and returns a structured response."""
+    if not GOOGLE_API_KEY:
+        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY not configured.")
 
     try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        # --- Configure the Gemini client --- (CHANGED)
+        genai.configure(api_key=GOOGLE_API_KEY)
 
-        # We use a powerful Haiku model which is fast and cheap
-        # For higher quality, you could swap this for 'claude-3-sonnet-20240229'
-        model_name = "claude-3-haiku-20240307"
+        # Use the fast and powerful Gemini 1.5 Flash model
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-        # The "Master Prompt" that instructs the AI
+        # The prompt is the same, but Gemini can handle a much larger context
         prompt = f"""
         You are an expert science communicator. Your task is to analyze the following scientific paper and provide a clear, structured summary for a non-expert audience. Please provide your response in the following XML format, and do not include any other text before or after the XML tags.
 
@@ -93,20 +91,15 @@ def get_summary_from_ai(text: str) -> AnalysisResponse:
 
         Here is the paper's text:
         <paper_text>
-        {text[:20000]} 
+        {text[:900000]} 
         </paper_text>
-        """  # We truncate the text to avoid exceeding token limits for the MVP
+        """  # Gemini 1.5 Flash has a huge 1M token context window!
 
-        message = client.messages.create(
-            model=model_name,
-            max_tokens=2048,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        ).content[0].text
+        # --- Generate content using the Gemini model --- (CHANGED)
+        response = model.generate_content(prompt)
+        message = response.text
 
-        # --- Simple XML Parsing ---
-        # A more robust solution would use an XML library, but this is fine for the MVP
+        # --- Simple XML Parsing (No changes here) ---
         summary = message.split("<summary>")[1].split("</summary>")[0].strip()
         methodology = message.split("<methodology>")[1].split("</methodology>")[0].strip()
         takeaways_block = message.split("<takeaways>")[1].split("</takeaways>")[0]
@@ -115,10 +108,11 @@ def get_summary_from_ai(text: str) -> AnalysisResponse:
         return AnalysisResponse(summary=summary, takeaways=takeaways, methodology=methodology)
 
     except Exception as e:
+        # This will catch errors from the Gemini API as well
         raise HTTPException(status_code=500, detail=f"An error occurred with the AI analysis: {e}")
 
 
-# --- API Endpoint ---
+# --- API Endpoint (No changes here) ---
 
 @app.post("/analyze", response_model=AnalysisResponse)
 def analyze_paper(request: PaperRequest):
