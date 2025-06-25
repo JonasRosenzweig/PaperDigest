@@ -1,3 +1,6 @@
+<!-- FILE: index.html -->
+<!-- This version includes the new header with non-functional login/register buttons. -->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,10 +13,32 @@
             background-color: #f4f7f9;
             color: #333;
             max-width: 800px;
-            margin: 40px auto;
+            margin: 20px auto; /* Reduced top margin */
             padding: 20px;
             line-height: 1.6;
         }
+        /* --- NEW STYLES FOR HEADER AND BUTTONS --- */
+        #header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        #header h1 {
+            margin: 0; /* Remove default margin from h1 */
+            text-align: left;
+        }
+        #auth-buttons button {
+            margin-left: 10px;
+            background-color: #ecf0f1;
+            color: #2c3e50;
+            border: 1px solid #bdc3c7;
+        }
+        #auth-buttons button:hover {
+            background-color: #dbe0e3;
+        }
+        /* --- END NEW STYLES --- */
+
         h1 {
             color: #2c3e50;
             text-align: center;
@@ -82,9 +107,18 @@
 </head>
 <body>
 
-    <h1>PaperDigest: AI Science Summarizer</h1>
+    <!-- NEW HEADER ELEMENT -->
+    <div id="header">
+        <h1>PaperDigest</h1>
+        <div id="auth-buttons">
+            <button onclick="alert('Login functionality not yet implemented.')">Login</button>
+            <button onclick="alert('Register functionality not yet implemented.')">Register</button>
+        </div>
+    </div>
+
     <p style="text-align: center; color: #7f8c8d;">Paste a link to an open-access scientific paper (PDF) to get a simple summary.</p>
 
+    <!-- The rest of the body is unchanged -->
     <div id="input-container">
         <input type="text" id="url-input" placeholder="e.g., https://arxiv.org/pdf/1706.03762">
         <button id="analyze-btn">Analyze</button>
@@ -109,14 +143,12 @@
     </div>
 
     <script>
+        // The JavaScript does not need any changes for this step.
         const urlInput = document.getElementById('url-input');
         const analyzeBtn = document.getElementById('analyze-btn');
         const loader = document.getElementById('loader');
         const resultsContainer = document.getElementById('results-container');
         const errorMessage = document.getElementById('error-message');
-
-        // --- The backend API URL ---
-        // When you run your Python code, this is its address.
         const API_URL = 'http://127.0.0.1:8000/analyze';
 
         analyzeBtn.addEventListener('click', async () => {
@@ -125,8 +157,6 @@
                 alert('Please enter a URL.');
                 return;
             }
-
-            // --- Reset UI ---
             analyzeBtn.disabled = true;
             resultsContainer.style.display = 'none';
             errorMessage.style.display = 'none';
@@ -135,9 +165,7 @@
             try {
                 const response = await fetch(API_URL, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url: url }),
                 });
 
@@ -145,14 +173,11 @@
                     const errorData = await response.json();
                     throw new Error(errorData.detail || 'An unknown error occurred.');
                 }
-
                 const data = await response.json();
                 displayResults(data);
-
             } catch (error) {
                 displayError(error.message);
             } finally {
-                // --- Re-enable UI ---
                 loader.style.display = 'none';
                 analyzeBtn.disabled = false;
             }
@@ -161,15 +186,13 @@
         function displayResults(data) {
             document.getElementById('summary-content').textContent = data.summary;
             document.getElementById('methodology-content').textContent = data.methodology;
-
             const takeawaysList = document.getElementById('takeaways-list');
-            takeawaysList.innerHTML = ''; // Clear old results
+            takeawaysList.innerHTML = '';
             data.takeaways.forEach(item => {
                 const li = document.createElement('li');
                 li.textContent = item;
                 takeawaysList.appendChild(li);
             });
-
             resultsContainer.style.display = 'block';
         }
 
