@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Science Summarizer</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f9;
+            color: #333;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        #input-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        #url-input {
+            flex-grow: 1;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        #analyze-btn {
+            padding: 12px 20px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        #analyze-btn:hover {
+            background-color: #2980b9;
+        }
+        #analyze-btn:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        .loader {
+            text-align: center;
+            padding: 40px;
+            display: none; /* Hidden by default */
+        }
+        #results-container {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            display: none; /* Hidden by default */
+        }
+        h2 {
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+            color: #34495e;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 10px;
+        }
+        #error-message {
+            color: #c0392b;
+            text-align: center;
+            padding: 20px;
+            background-color: #f9e5e3;
+            border-radius: 6px;
+            display: none; /* Hidden by default */
+        }
+    </style>
+</head>
+<body>
+
+    <h1>AI Science Summarizer</h1>
+    <p style="text-align: center; color: #7f8c8d;">Paste a link to an open-access scientific paper (PDF) to get a simple summary.</p>
+
+    <div id="input-container">
+        <input type="text" id="url-input" placeholder="e.g., https://arxiv.org/pdf/1706.03762">
+        <button id="analyze-btn">Analyze</button>
+    </div>
+
+    <div id="loader" class="loader">
+        <p>Analyzing... This can take up to a minute.</p>
+        <p>Please keep this tab open.</p>
+    </div>
+
+    <div id="error-message"></div>
+
+    <div id="results-container">
+        <h2>Summary</h2>
+        <p id="summary-content"></p>
+
+        <h2>Key Takeaways</h2>
+        <ul id="takeaways-list"></ul>
+
+        <h2>Methodology Explained</h2>
+        <p id="methodology-content"></p>
+    </div>
+
+    <script>
+        const urlInput = document.getElementById('url-input');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const loader = document.getElementById('loader');
+        const resultsContainer = document.getElementById('results-container');
+        const errorMessage = document.getElementById('error-message');
+
+        // --- The backend API URL ---
+        // When you run your Python code, this is its address.
+        const API_URL = 'http://127.0.0.1:8000/analyze';
+
+        analyzeBtn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            if (!url) {
+                alert('Please enter a URL.');
+                return;
+            }
+
+            // --- Reset UI ---
+            analyzeBtn.disabled = true;
+            resultsContainer.style.display = 'none';
+            errorMessage.style.display = 'none';
+            loader.style.display = 'block';
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'An unknown error occurred.');
+                }
+
+                const data = await response.json();
+                displayResults(data);
+
+            } catch (error) {
+                displayError(error.message);
+            } finally {
+                // --- Re-enable UI ---
+                loader.style.display = 'none';
+                analyzeBtn.disabled = false;
+            }
+        });
+
+        function displayResults(data) {
+            document.getElementById('summary-content').textContent = data.summary;
+            document.getElementById('methodology-content').textContent = data.methodology;
+
+            const takeawaysList = document.getElementById('takeaways-list');
+            takeawaysList.innerHTML = ''; // Clear old results
+            data.takeaways.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                takeawaysList.appendChild(li);
+            });
+
+            resultsContainer.style.display = 'block';
+        }
+
+        function displayError(message) {
+            errorMessage.textContent = `Error: ${message}`;
+            errorMessage.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
