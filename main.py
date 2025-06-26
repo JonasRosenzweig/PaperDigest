@@ -1,7 +1,6 @@
 import os
-import json
 import fitz
-import requests
+import httpx  # Replaces 'requests'
 import google.generativeai as genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
@@ -12,34 +11,13 @@ from typing import Dict, List
 # --- Setup ---
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-CACHE_FILE = "cache.json"
 
-
-# --- NEW: Persistent Cache Logic ---
-def load_cache() -> Dict[str, "AnalysisResponse"]:
-    """Loads the analysis cache from a JSON file if it exists."""
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r") as f:
-            print("--- Loading cache from file... ---")
-            cache_data = json.load(f)
-            # We need to convert the raw dicts back into our Pydantic model
-            return {url: AnalysisResponse(**data) for url, data in cache_data.items()}
-    return {}
-
-
-def save_cache(cache: Dict[str, "AnalysisResponse"]):
-    """Saves the entire cache to a JSON file."""
-    with open(CACHE_FILE, "w") as f:
-        # Convert Pydantic models to dictionaries for JSON serialization
-        json.dump({url: model.dict() for url, model in cache.items()}, f, indent=4)
-    print("--- Cache saved to file. ---")
-
-
-analysis_cache = load_cache()
+# --- In-Memory Cache ---
+analysis_cache: Dict[str, "AnalysisResponse"] = {}
 
 app = FastAPI(
-    title="Science Summarizer API (with Persistent Caching)",
-    description="An API to summarize scientific papers with a persistent cache.",
+    title="Async Science Summarizer API",
+    description="An asynchronous API to summarize scientific papers.",
 )
 
 app.add_middleware(
@@ -64,27 +42,36 @@ class AnalysisResponse(BaseModel):
     cached: bool
 
 
-# --- Core Logic Functions (No changes) ---
-def get_text_from_url(url: str) -> str:
-    # This function remains the same.
+# --- Core Logic Functions (Now Asynchronous!) ---
+async def get_text_from_url(url: str) -> str:
+    # Use an async HTTP client that doesn't block the server
+    async with httpx.AsyncClient() as client:
+        try:
+            # Add a standard browser User-Agent to prevent getting blocked
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+            response = await client.get(url, timeout=30, headers=headers)
+            response.raise_for_status()
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=400, detail=f"Failed to download the file: {e}")
+
+    if "application/pdf" not in response.headers.get("Content-Type", ""):
+        raise HTTPException(status_code=400, detail="URL does not point to a PDF file.")
+
+    pdf_bytes = await response.aread()
+
     try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        if "application/pdf" not in response.headers.get("Content-Type", ""):
-            raise HTTPException(status_code=400, detail="URL does not point to a PDF file.")
-        pdf_bytes = response.content
+        # PyMuPDF is CPU-bound, so it runs fine inside an async function.
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
             full_text = "".join(page.get_text() for page in doc)
         if not full_text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from the PDF.")
         return full_text
-    except requests.RequestException as e:
-        raise HTTPException(status_code=400, detail=f"Failed to download the file: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred while processing the PDF: {e}")
 
 
-def get_summary_from_ai(text: str) -> dict:
+async def get_summary_from_ai(text: str) -> dict:
     if not GOOGLE_API_KEY:
         raise HTTPException(status_code=500, detail="GOOGLE_API_KEY not configured.")
 
@@ -92,7 +79,7 @@ def get_summary_from_ai(text: str) -> dict:
         genai.configure(api_key=GOOGLE_API_KEY)
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-        # Using the prompt from your uploaded file
+        # This is the prompt from the code you uploaded
         prompt = f"""
         You are an expert science journalist and communicator. Your primary task is to analyze the provided text from a scientific paper and generate a structured, easy-to-understand summary.
 
@@ -118,7 +105,8 @@ def get_summary_from_ai(text: str) -> dict:
         {text[:900000]} 
         </paper_text>
         """
-        response = model.generate_content(prompt)
+        # Use the async version of the Gemini library method
+        response = await model.generate_content_async(prompt)
         message = response.text
 
         title = message.split("<title>")[1].split("</title>")[0].strip()
@@ -131,32 +119,33 @@ def get_summary_from_ai(text: str) -> dict:
         raise HTTPException(status_code=500, detail=f"An error occurred with the AI analysis: {e}")
 
 
-# --- API Endpoints ---
+# --- API Endpoints (Now Asynchronous!) ---
 @app.post("/analyze", response_model=AnalysisResponse)
-def analyze_paper(request: PaperRequest):
+async def analyze_paper(request: PaperRequest):
     request_url = str(request.url)
     print(f"Received request for URL: {request_url}")
 
     if request_url in analysis_cache:
         print("--- Cache Hit! Returning saved result. ---")
         cached_response = analysis_cache[request_url]
-        cached_response.cached = True
-        return cached_response
+        # Create a new response object to set the cached flag
+        return AnalysisResponse(**cached_response.dict(exclude={'cached'}), cached=True)
 
     print("--- Cache Miss. Starting new analysis. ---")
-    paper_text = get_text_from_url(request_url)
-    analysis_dict = get_summary_from_ai(paper_text)
+    paper_text = await get_text_from_url(request_url)
+    analysis_dict = await get_summary_from_ai(paper_text)
 
     analysis_response = AnalysisResponse(**analysis_dict, cached=False)
 
+    print("--- Saving new result to cache. ---")
     analysis_cache[request_url] = analysis_response
-    save_cache(analysis_cache)  # NEW: Save the updated cache to the file
 
     print("Analysis complete.")
     return analysis_response
 
 
 @app.get("/library")
-def get_library():
-    # This endpoint now reads directly from the cache dictionary
+async def get_library():
+    # This endpoint is simple and doesn't do I/O, so it can remain async
+    # without any `await` calls.
     return analysis_cache
