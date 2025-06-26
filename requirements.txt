@@ -5,3 +5,5 @@ httpx
 PyMuPDF
 google-generativeai
 python-dotenv
+sqlmodel
+aiosqlite
