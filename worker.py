@@ -8,6 +8,7 @@ import time
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 from dotenv import load_dotenv
 from typing import Optional
+from bs4 import BeautifulSoup  # NEW: Import BeautifulSoup
 
 
 # --- Job Model Definition ---
@@ -34,27 +35,67 @@ engine = create_engine(DATABASE_URL, echo=False)
 
 # --- Core Logic ---
 def get_text_from_url(url: str) -> str:
+    """
+    NEW: This function now detects content type and handles both PDF and HTML.
+    """
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-    response = httpx.get(url, timeout=30, headers=headers)
-    response.raise_for_status()
-    pdf_bytes = response.content
-    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-        return "".join(page.get_text() for page in doc)
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
+    print(f"Fetching content from {url}...")
+    response = httpx.get(url, timeout=30, headers=headers, follow_redirects=True)
+    response.raise_for_status()  # Will raise an error for 4xx/5xx responses
+
+    content_type = response.headers.get('content-type', '').lower()
+
+    text = ""
+    # --- PDF Processing Logic ---
+    if 'application/pdf' in content_type:
+        print("PDF detected. Extracting text with PyMuPDF.")
+        pdf_bytes = response.content
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            text = "".join(page.get_text() for page in doc)
+
+    # --- HTML Processing Logic ---
+    elif 'text/html' in content_type:
+        print("HTML detected. Extracting text with BeautifulSoup.")
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # Remove script and style elements
+        for script_or_style in soup(["script", "style"]):
+            script_or_style.decompose()
+        # Get text, strip leading/trailing whitespace, and join lines
+        text = ' '.join(t.strip() for t in soup.stripped_strings)
+
+    else:
+        raise Exception(f"Unsupported content type: {content_type}")
+
+    if not text:
+        raise Exception("Could not extract any text from the URL.")
+
+    return text
 
 
 def get_summary_from_ai(text: str) -> dict:
+    # This function remains unchanged and includes the full prompt.
     genai.configure(api_key=GOOGLE_API_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-    # --- The Full, Engineered Prompt ---
+    # This is the prompt from the code you uploaded
     prompt = f"""
     You are an expert science journalist and communicator. Your primary task is to analyze the provided text from a scientific paper and generate a structured, easy-to-understand summary.
-
+    
     Follow these steps precisely:
 
-    1.  **Read the entire text** to understand its core concepts.
-    2.  **Generate your response in the following strict XML format.** Do not include any text or explanations outside of these tags.
+
+    **Step 1: Internal Analysis (Your Scratchpad)**
+    First, think step-by-step. Read the entire provided text and, inside a `<scratchpad>` XML tag, identify and list the following core components:
+    - **Problem:** What is the core research question or the problem the authors are trying to solve?
+    - **Methodology:** How did the researchers conduct their study? (e.g., "analyzed survey data," "conducted a randomized trial," "built a new type of neural network").
+    - **Results:** What were the key findings or observations? List the most important data points or outcomes.
+    - **Conclusion:** What is the main conclusion or interpretation the authors draw from their results?
+
+    **Step 2: Final Output Generation**
+    After completing your internal analysis, and using ONLY the information you gathered in the scratchpad, generate the final public response in the following strict XML format. Do not include any other text or explanation outside of these XML tags.
 
     <analysis>
       <title>Create a short, descriptive title for the paper (max 10 words) that captures its main topic, suitable for a general audience.</title>
@@ -65,7 +106,7 @@ def get_summary_from_ai(text: str) -> dict:
         <item>Extract the single most important finding or "so what?" of the paper.</item>
         <item>Extract the second most important finding.</item>
         <item>Extract a third key finding or an important limitation mentioned by the authors.</item>
-        <item>Extract a reference to a potential real-world application of the findings, only if there is one.</item>
+        <item>Extract a reference to a potential real-world application of the findings, if there are any. If there are none (and do not invent any) then Extract a fourth finding.</item>
       </takeaways>
     </analysis>
 
@@ -85,7 +126,7 @@ def get_summary_from_ai(text: str) -> dict:
     return {"title": title, "summary": summary, "takeaways": takeaways, "methodology": methodology}
 
 
-# --- Main Worker Loop ---
+# --- Main Worker Loop (No changes needed) ---
 def process_pending_job():
     with Session(engine) as session:
         job_to_process = session.exec(select(Job).where(Job.status == "PENDING")).first()
@@ -119,7 +160,7 @@ def process_pending_job():
 
 
 def main():
-    print("--- Background Worker Started ---")
+    print("--- Background Worker Started (with HTML support) ---")
     while True:
         process_pending_job()
         time.sleep(5)
