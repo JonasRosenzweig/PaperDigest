@@ -1,7 +1,7 @@
 fastapi
 uvicorn[standard]
 pydantic
-requests
+httpx
 PyMuPDF
 google-generativeai
 python-dotenv

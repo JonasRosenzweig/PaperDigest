@@ -1,4 +1,5 @@
 import os
+import json
 import fitz
 import requests
 import google.generativeai as genai
@@ -11,13 +12,34 @@ from typing import Dict, List
 # --- Setup ---
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+CACHE_FILE = "cache.json"
 
-# --- In-Memory Cache ---
-analysis_cache: Dict[str, "AnalysisResponse"] = {}
+
+# --- NEW: Persistent Cache Logic ---
+def load_cache() -> Dict[str, "AnalysisResponse"]:
+    """Loads the analysis cache from a JSON file if it exists."""
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r") as f:
+            print("--- Loading cache from file... ---")
+            cache_data = json.load(f)
+            # We need to convert the raw dicts back into our Pydantic model
+            return {url: AnalysisResponse(**data) for url, data in cache_data.items()}
+    return {}
+
+
+def save_cache(cache: Dict[str, "AnalysisResponse"]):
+    """Saves the entire cache to a JSON file."""
+    with open(CACHE_FILE, "w") as f:
+        # Convert Pydantic models to dictionaries for JSON serialization
+        json.dump({url: model.dict() for url, model in cache.items()}, f, indent=4)
+    print("--- Cache saved to file. ---")
+
+
+analysis_cache = load_cache()
 
 app = FastAPI(
-    title="Science Summarizer API (with Caching & Library)",
-    description="An API to summarize scientific papers and view a library of cached results.",
+    title="Science Summarizer API (with Persistent Caching)",
+    description="An API to summarize scientific papers with a persistent cache.",
 )
 
 app.add_middleware(
@@ -29,20 +51,20 @@ app.add_middleware(
 )
 
 
-# --- Pydantic Models ---
+# --- Pydantic Models (No changes) ---
 class PaperRequest(BaseModel):
     url: HttpUrl
 
 
 class AnalysisResponse(BaseModel):
-    title: str  # NEW: Field for the paper's title
+    title: str
     summary: str
     takeaways: List[str]
     methodology: str
     cached: bool
 
 
-# --- Core Logic Functions ---
+# --- Core Logic Functions (No changes) ---
 def get_text_from_url(url: str) -> str:
     # This function remains the same.
     try:
@@ -70,7 +92,7 @@ def get_summary_from_ai(text: str) -> dict:
         genai.configure(api_key=GOOGLE_API_KEY)
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-        # --- NEW: Updated prompt to include title extraction ---
+        # Using the prompt from your uploaded file
         prompt = f"""
         You are an expert science journalist and communicator. Your primary task is to analyze the provided text from a scientific paper and generate a structured, easy-to-understand summary.
 
@@ -99,7 +121,6 @@ def get_summary_from_ai(text: str) -> dict:
         response = model.generate_content(prompt)
         message = response.text
 
-        # --- NEW: Parse the new title tag ---
         title = message.split("<title>")[1].split("</title>")[0].strip()
         summary = message.split("<summary>")[1].split("</summary>")[0].strip()
         methodology = message.split("<methodology>")[1].split("</methodology>")[0].strip()
@@ -128,14 +149,14 @@ def analyze_paper(request: PaperRequest):
 
     analysis_response = AnalysisResponse(**analysis_dict, cached=False)
 
-    print("--- Saving new result to cache. ---")
     analysis_cache[request_url] = analysis_response
+    save_cache(analysis_cache)  # NEW: Save the updated cache to the file
 
     print("Analysis complete.")
     return analysis_response
 
 
-# --- NEW: Endpoint to get the library of cached items ---
 @app.get("/library")
 def get_library():
+    # This endpoint now reads directly from the cache dictionary
     return analysis_cache

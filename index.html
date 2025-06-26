@@ -22,13 +22,7 @@
         #error-message, #cache-status { text-align: center; padding: 15px; border-radius: 6px; margin-top: 20px; display: none; }
         #error-message { color: #c0392b; background-color: #f9e5e3; }
         #cache-status { color: #16a085; background-color: #e8f6f3; }
-
-        /* --- NEW: Sidebar Styles --- */
-        #library-sidebar {
-            height: 100%; width: 0; position: fixed; z-index: 2; top: 0; right: 0;
-            background-color: #fff; box-shadow: -5px 0 15px rgba(0,0,0,0.1);
-            overflow-x: hidden; transition: 0.3s; padding-top: 60px;
-        }
+        #library-sidebar { height: 100%; width: 0; position: fixed; z-index: 2; top: 0; right: 0; background-color: #fff; box-shadow: -5px 0 15px rgba(0,0,0,0.1); overflow-x: hidden; transition: 0.3s; padding-top: 60px; }
         #library-sidebar a { padding: 10px 15px; text-decoration: none; font-size: 18px; color: #34495e; display: block; transition: 0.2s; border-bottom: 1px solid #ecf0f1; }
         #library-sidebar a:hover { background-color: #f4f7f9; }
         #library-sidebar .close-btn { position: absolute; top: 15px; right: 25px; font-size: 36px; margin-left: 50px; color: #95a5a6; }
@@ -64,7 +58,6 @@
         <ul id="takeaways-list"></ul>
     </div>
 
-    <!-- NEW: Sidebar HTML -->
     <div id="library-sidebar">
         <a href="javascript:void(0)" class="close-btn">&times;</a>
         <h2>Cached Papers</h2>
@@ -78,16 +71,12 @@
         const resultsContainer = document.getElementById('results-container');
         const errorMessage = document.getElementById('error-message');
         const cacheStatus = document.getElementById('cache-status');
-
-        // NEW: Sidebar elements
         const libraryBtn = document.getElementById('library-btn');
         const librarySidebar = document.getElementById('library-sidebar');
         const closeLibraryBtn = document.querySelector('#library-sidebar .close-btn');
         const libraryList = document.getElementById('library-list');
-
         const API_URL = 'http://127.0.0.1:8000';
 
-        // --- Event Listeners ---
         analyzeBtn.addEventListener('click', async () => {
             const url = urlInput.value.trim();
             if (!url) return alert('Please enter a URL.');
@@ -97,7 +86,6 @@
         libraryBtn.addEventListener('click', () => openLibrary());
         closeLibraryBtn.addEventListener('click', () => closeLibrary());
 
-        // --- Core Functions ---
         async function performAnalysis(url) {
             analyzeBtn.disabled = true;
             loader.style.display = 'block';
@@ -130,10 +118,8 @@
                 const response = await fetch(`${API_URL}/library`);
                 if (!response.ok) throw new Error("Could not fetch library.");
                 const libraryData = await response.json();
-
-                libraryList.innerHTML = ''; // Clear previous list
+                libraryList.innerHTML = '';
                 const urls = Object.keys(libraryData);
-
                 if (urls.length === 0) {
                     libraryList.innerHTML = '<a href="#">No papers in library yet.</a>';
                 } else {
@@ -167,11 +153,9 @@
                 cacheStatus.textContent = 'Analysis complete. Result saved to cache.';
             }
             cacheStatus.style.display = 'block';
-
             document.getElementById('result-title').textContent = data.title;
             document.getElementById('summary-content').textContent = data.summary;
             document.getElementById('methodology-content').textContent = data.methodology;
-
             const takeawaysList = document.getElementById('takeaways-list');
             takeawaysList.innerHTML = '';
             data.takeaways.forEach(item => {
@@ -179,7 +163,6 @@
                 li.textContent = item;
                 takeawaysList.appendChild(li);
             });
-
             resultsContainer.style.display = 'block';
         }
 
