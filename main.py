@@ -72,7 +72,7 @@ def get_summary_from_ai(text: str) -> dict:
         genai.configure(api_key=GOOGLE_API_KEY)
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
         prompt = f"""
-        You are an expert science journalist and communicator, tasked with distilling a complex academic paper into a clear, accessible, and accurate summary for a curious but non-technical audience (e.g., an undergraduate student).
+        You are an expert science journalist and communicator, tasked with distilling a complex academic paper into a clear, accessible, and accurate summary for a curious but non-technical audience (e.g., a high school student).
 
         Your task is to follow a two-step process:
 
@@ -87,13 +87,14 @@ def get_summary_from_ai(text: str) -> dict:
         After completing your internal analysis, and using ONLY the information you gathered in the scratchpad, generate the final public response in the following strict XML format. Do not include any other text or explanation outside of these XML tags.
 
         <analysis>
-          <summary>A single, concise paragraph (around 150 words) that explains the "what, why, and how" of the research at a high-school reading level. It should be easily understandable to someone outside the field.</summary>
+          <summary>A single, concise paragraph (around 150 words) that explains the "what, why, and how" of the research at a high-school reading level. It should be easily understandable to someone outside the field. If new concepts need to be explained, generate rational explicative real-world analogies to help explain them to laymen.</summary>
+          <methodology>In one or two simple sentences, describe the experiment or study design. For example, "The researchers analyzed survey data from 500 participants" or "They built a machine learning model to analyze images." Do not use technical jargon unless it is absolutely essential and explained.</methodology>
           <takeaways>
             <item>Extract the single most important finding or "so what?" of the paper.</item>
             <item>Extract the second most important finding.</item>
             <item>Extract a third key finding or an important limitation mentioned by the authors.</item>
+            <item>Extract a reference to a potential real-world application of the findings, only if there is one.</item>
           </takeaways>
-          <methodology>In one or two simple sentences, describe the experiment or study design. For example, "The researchers analyzed survey data from 500 participants" or "They built a machine learning model to analyze images." Do not use technical jargon unless it is absolutely essential and explained.</methodology>
         </analysis>
 
         Do not invent or infer any information not present in the provided text.
