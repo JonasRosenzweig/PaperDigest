@@ -1,6 +1,3 @@
-# FILE: main.py
-# This version adds print statements to debug the API key loading process.
-
 import os
 import fitz
 import requests
@@ -9,24 +6,19 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from typing import Dict, List
 
 # --- Setup ---
-print("--- Loading environment variables from .env file... ---")
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# --- NEW: Debugging Print Statement ---
-if GOOGLE_API_KEY:
-    print("SUCCESS: GOOGLE_API_KEY loaded successfully.")
-    # For security, let's only print the first few characters
-    print(f"API Key starts with: {GOOGLE_API_KEY[:4]}...")
-else:
-    print("ERROR: GOOGLE_API_KEY not found in environment. Please check your .env file.")
-    # We can exit here if the key is missing, but for now we'll let it fail later.
-
+# --- NEW: In-Memory Cache ---
+# A simple Python dictionary to act as our cache.
+# The key will be the URL, and the value will be the AnalysisResponse.
+analysis_cache: Dict[str, "AnalysisResponse"] = {}
 
 app = FastAPI(
-    title="Science Summarizer API (Gemini Edition)",
+    title="Science Summarizer API (with Caching)",
     description="An API to summarize scientific papers from a URL using Google Gemini.",
 )
 
@@ -39,18 +31,21 @@ app.add_middleware(
 )
 
 
-# --- Pydantic Models (No changes) ---
+# --- Pydantic Models ---
 class PaperRequest(BaseModel):
     url: HttpUrl
 
+
 class AnalysisResponse(BaseModel):
     summary: str
-    takeaways: list[str]
+    takeaways: List[str]
     methodology: str
+    cached: bool  # NEW: Field to indicate if the result is from the cache
 
 
 # --- Core Logic Functions (No changes) ---
 def get_text_from_url(url: str) -> str:
+    # This function remains the same as your working version.
     try:
         response = requests.get(url, timeout=30)
         response.raise_for_status()
@@ -68,9 +63,9 @@ def get_text_from_url(url: str) -> str:
         raise HTTPException(status_code=500, detail=f"An error occurred while processing the PDF: {e}")
 
 
-def get_summary_from_ai(text: str) -> AnalysisResponse:
+def get_summary_from_ai(text: str) -> dict:
+    # This function is also unchanged. It returns a dictionary.
     if not GOOGLE_API_KEY:
-        # This will now be caught at startup, but we keep it as a safeguard.
         raise HTTPException(status_code=500, detail="GOOGLE_API_KEY not configured.")
 
     try:
@@ -114,17 +109,40 @@ def get_summary_from_ai(text: str) -> AnalysisResponse:
         methodology = message.split("<methodology>")[1].split("</methodology>")[0].strip()
         takeaways_block = message.split("<takeaways>")[1].split("</takeaways>")[0]
         takeaways = [item.split("</item>")[0].strip() for item in takeaways_block.split("<item>")[1:]]
-        return AnalysisResponse(summary=summary, takeaways=takeaways, methodology=methodology)
+        return {"summary": summary, "takeaways": takeaways, "methodology": methodology}
     except Exception as e:
-        print(f"--- ERROR FROM GOOGLE AI --- \n{e}\n--------------------------")
         raise HTTPException(status_code=500, detail=f"An error occurred with the AI analysis: {e}")
 
 
-# --- API Endpoint (No changes) ---
+# --- API Endpoint (Now with Caching Logic) ---
 @app.post("/analyze", response_model=AnalysisResponse)
 def analyze_paper(request: PaperRequest):
-    print(f"Analyzing URL: {request.url}")
-    paper_text = get_text_from_url(str(request.url))
-    analysis = get_summary_from_ai(paper_text)
+    request_url = str(request.url)
+    print(f"Received request for URL: {request_url}")
+
+    # --- NEW: Check the cache first ---
+    if request_url in analysis_cache:
+        print("--- Cache Hit! Returning saved result. ---")
+        cached_response = analysis_cache[request_url]
+        # We need a new response object to set 'cached' to True
+        return AnalysisResponse(
+            summary=cached_response.summary,
+            takeaways=cached_response.takeaways,
+            methodology=cached_response.methodology,
+            cached=True
+        )
+
+    # --- If not in cache, proceed with analysis ---
+    print("--- Cache Miss. Starting new analysis. ---")
+    paper_text = get_text_from_url(request_url)
+    analysis_dict = get_summary_from_ai(paper_text)
+
+    # Create the response object, marking it as not from cache
+    analysis_response = AnalysisResponse(**analysis_dict, cached=False)
+
+    # --- NEW: Save the new result to the cache ---
+    print("--- Saving new result to cache. ---")
+    analysis_cache[request_url] = analysis_response
+
     print("Analysis complete.")
-    return analysis
+    return analysis_response
