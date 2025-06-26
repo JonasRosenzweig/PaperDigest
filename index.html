@@ -5,26 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Science Summarizer</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f9; color: #333; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; }
-        h1 { color: #2c3e50; text-align: center; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f9; color: #333; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; transition: margin-right 0.3s; }
+        h1, h2 { color: #2c3e50; }
+        #main-header { display: flex; justify-content: space-between; align-items: center; }
+        #main-header h1 { text-align: left; margin: 0; }
         #input-container { display: flex; gap: 10px; margin-bottom: 20px; }
         #url-input { flex-grow: 1; padding: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; }
         button { padding: 12px 20px; background-color: #3498db; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: background-color 0.3s; }
         button:hover { background-color: #2980b9; }
-        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        #library-btn { background-color: #2c3e50; }
         .loader { text-align: center; padding: 40px; display: none; }
         #results-container { background-color: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); display: none; }
-        h2 { border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; color: #34495e; }
+        h2 { border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }
         ul { padding-left: 20px; }
         li { margin-bottom: 10px; }
         #error-message, #cache-status { text-align: center; padding: 15px; border-radius: 6px; margin-top: 20px; display: none; }
         #error-message { color: #c0392b; background-color: #f9e5e3; }
-        #cache-status { color: #16a085; background-color: #e8f6f3; border: 1px solid #16a085; }
+        #cache-status { color: #16a085; background-color: #e8f6f3; }
+
+        /* --- NEW: Sidebar Styles --- */
+        #library-sidebar {
+            height: 100%; width: 0; position: fixed; z-index: 2; top: 0; right: 0;
+            background-color: #fff; box-shadow: -5px 0 15px rgba(0,0,0,0.1);
+            overflow-x: hidden; transition: 0.3s; padding-top: 60px;
+        }
+        #library-sidebar a { padding: 10px 15px; text-decoration: none; font-size: 18px; color: #34495e; display: block; transition: 0.2s; border-bottom: 1px solid #ecf0f1; }
+        #library-sidebar a:hover { background-color: #f4f7f9; }
+        #library-sidebar .close-btn { position: absolute; top: 15px; right: 25px; font-size: 36px; margin-left: 50px; color: #95a5a6; }
+        #library-sidebar .close-btn:hover { color: #2c3e50; }
+        #library-sidebar h2 { padding: 0 15px; }
     </style>
 </head>
 <body>
 
-    <h1>PaperDigest: AI Science Summarizer</h1>
+    <div id="main-header">
+        <h1>PaperDigest</h1>
+        <button id="library-btn">Library</button>
+    </div>
+
     <p style="text-align: center; color: #7f8c8d;">Paste a link to an open-access scientific paper to get a simple summary.</p>
 
     <div id="input-container">
@@ -32,22 +50,25 @@
         <button id="analyze-btn">Analyze</button>
     </div>
 
-    <div id="loader" class="loader">
-        <p>Analyzing... This can take up to a minute.</p>
-        <p>Please keep this tab open.</p>
-    </div>
-
-    <!-- NEW: Element to show cache status -->
+    <div id="loader" class="loader"><p>Analyzing... This can take up to a minute.</p></div>
     <div id="cache-status"></div>
     <div id="error-message"></div>
 
     <div id="results-container">
-        <h2>Summary</h2>
+        <h2 id="result-title"></h2>
+        <h3>Summary</h3>
         <p id="summary-content"></p>
-        <h2>Methodology Explained</h2>
+        <h3>Methodology Explained</h3>
         <p id="methodology-content"></p>
-        <h2>Key Takeaways</h2>
+        <h3>Key Takeaways</h3>
         <ul id="takeaways-list"></ul>
+    </div>
+
+    <!-- NEW: Sidebar HTML -->
+    <div id="library-sidebar">
+        <a href="javascript:void(0)" class="close-btn">&times;</a>
+        <h2>Cached Papers</h2>
+        <div id="library-list"></div>
     </div>
 
     <script>
@@ -56,52 +77,98 @@
         const loader = document.getElementById('loader');
         const resultsContainer = document.getElementById('results-container');
         const errorMessage = document.getElementById('error-message');
-        const cacheStatus = document.getElementById('cache-status'); // NEW
+        const cacheStatus = document.getElementById('cache-status');
 
-        const API_URL = 'http://127.0.0.1:8000/analyze';
+        // NEW: Sidebar elements
+        const libraryBtn = document.getElementById('library-btn');
+        const librarySidebar = document.getElementById('library-sidebar');
+        const closeLibraryBtn = document.querySelector('#library-sidebar .close-btn');
+        const libraryList = document.getElementById('library-list');
 
+        const API_URL = 'http://127.0.0.1:8000';
+
+        // --- Event Listeners ---
         analyzeBtn.addEventListener('click', async () => {
             const url = urlInput.value.trim();
             if (!url) return alert('Please enter a URL.');
+            await performAnalysis(url);
+        });
 
+        libraryBtn.addEventListener('click', () => openLibrary());
+        closeLibraryBtn.addEventListener('click', () => closeLibrary());
+
+        // --- Core Functions ---
+        async function performAnalysis(url) {
             analyzeBtn.disabled = true;
+            loader.style.display = 'block';
             resultsContainer.style.display = 'none';
             errorMessage.style.display = 'none';
-            cacheStatus.style.display = 'none'; // NEW
-            loader.style.display = 'block';
+            cacheStatus.style.display = 'none';
 
             try {
-                const response = await fetch(API_URL, {
+                const response = await fetch(`${API_URL}/analyze`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url: url }),
                 });
-
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.detail || 'An unknown error occurred.');
                 }
-
                 const data = await response.json();
                 displayResults(data);
-
             } catch (error) {
                 displayError(error.message);
             } finally {
                 loader.style.display = 'none';
                 analyzeBtn.disabled = false;
             }
-        });
+        }
+
+        async function openLibrary() {
+            try {
+                const response = await fetch(`${API_URL}/library`);
+                if (!response.ok) throw new Error("Could not fetch library.");
+                const libraryData = await response.json();
+
+                libraryList.innerHTML = ''; // Clear previous list
+                const urls = Object.keys(libraryData);
+
+                if (urls.length === 0) {
+                    libraryList.innerHTML = '<a href="#">No papers in library yet.</a>';
+                } else {
+                    urls.forEach(url => {
+                        const paper = libraryData[url];
+                        const link = document.createElement('a');
+                        link.href = '#';
+                        link.textContent = paper.title;
+                        link.onclick = (e) => {
+                            e.preventDefault();
+                            displayResults(paper);
+                            closeLibrary();
+                        };
+                        libraryList.appendChild(link);
+                    });
+                }
+                librarySidebar.style.width = "350px";
+            } catch (error) {
+                alert(error.message);
+            }
+        }
+
+        function closeLibrary() {
+            librarySidebar.style.width = "0";
+        }
 
         function displayResults(data) {
-            // NEW: Check the 'cached' field from the response
             if (data.cached) {
-                cacheStatus.textContent = 'Loaded from Cache';
+                cacheStatus.textContent = 'Result loaded from cache!';
             } else {
-                cacheStatus.textContent = 'Analysis complete. Caching result...';
+                cacheStatus.textContent = 'Analysis complete. Result saved to cache.';
             }
             cacheStatus.style.display = 'block';
 
+            document.getElementById('result-title').textContent = data.title;
             document.getElementById('summary-content').textContent = data.summary;
             document.getElementById('methodology-content').textContent = data.methodology;
 
